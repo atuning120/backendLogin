@@ -24,7 +24,7 @@ func SendRecoveryToken(c *gin.Context) {
 	}
 	// Buscar usuario
 	var user models.User
-	err := db.MongoClient.Database("mi_base").Collection("users").
+	err := db.MongoClient.Database("db").Collection("users").
 		FindOne(c, bson.M{"email": input.Email}).Decode(&user)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Usuario no encontrado"})
@@ -55,7 +55,7 @@ func ResetPassword(c *gin.Context) {
 	hash, _ := bcrypt.GenerateFromPassword([]byte(input.Password), bcrypt.DefaultCost)
 	// Actualizar contraseña
 	objID, _ := primitive.ObjectIDFromHex(userID)
-	db.MongoClient.Database("mi_base").Collection("users").
+	db.MongoClient.Database("db").Collection("users").
 		UpdateOne(c, bson.M{"_id": objID}, bson.M{"$set": bson.M{"password": string(hash)}})
 	db.RedisClient.Del(db.Ctx, "recovery_token:"+token)
 	c.JSON(http.StatusOK, gin.H{"message": "Contraseña actualizada"})

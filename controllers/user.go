@@ -34,7 +34,7 @@ func Register(c *gin.Context) {
 		CreatedAt: primitive.NewDateTimeFromTime(time.Now()),
 	}
 
-	_, err := db.MongoClient.Database("mi_base").Collection("users").InsertOne(context.TODO(), user)
+	_, err := db.MongoClient.Database("db").Collection("users").InsertOne(context.TODO(), user)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error creando usuario"})
 		return
@@ -55,7 +55,7 @@ func Login(c *gin.Context) {
 	}
 
 	var user models.User
-	err := db.MongoClient.Database("mi_base").Collection("users").
+	err := db.MongoClient.Database("db").Collection("users").
 		FindOne(context.TODO(), bson.M{"email": input.Email}).Decode(&user)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Credenciales incorrectas"})
