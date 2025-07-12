@@ -89,6 +89,20 @@ func ChangeEmail(c *gin.Context) {
 		return
 	}
 
+	// INVALIDAR todas las solicitudes de cambio de email pendientes anteriores para este usuario
+	_, err = db.MongoClient.Database("db").Collection("email_history").UpdateMany(context.TODO(),
+		bson.M{
+			"user_id":   userID,
+			"confirmed": false,
+			"canceled":  false,
+		},
+		bson.M{"$set": bson.M{"canceled": true}},
+	)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error invalidando solicitudes anteriores"})
+		return
+	}
+
 	// Guardar solicitud de cambio en email_history (SIN cambiar el email todavía)
 	confirmationToken := uuid.NewString() // Generar token de confirmación
 	history := models.EmailHistory{
@@ -243,7 +257,26 @@ func Login(c *gin.Context) {
 		return
 	}
 
-	token, _ := utils.GenerateJWT(user.ID.Hex())
+	// Generar nuevo token
+	token, err := utils.GenerateJWT(user.ID.Hex())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error generando token"})
+		return
+	}
+
+	// Actualizar el token actual en la base de datos (esto invalida tokens anteriores)
+	_, err = db.MongoClient.Database("db").Collection("users").UpdateOne(context.TODO(),
+		bson.M{"_id": user.ID},
+		bson.M{"$set": bson.M{
+			"currentToken": token,
+			"updatedAt":    primitive.NewDateTimeFromTime(time.Now()),
+		}},
+	)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error actualizando sesión"})
+		return
+	}
+
 	c.JSON(http.StatusOK, gin.H{"token": token})
 }
 
@@ -256,7 +289,7 @@ func ChangeEmailConfirm(c *gin.Context) {
 		return
 	}
 
-	// Buscar la solicitud de cambio pendiente usando solo el token
+	// Buscar la solicitud de cambio pendiente usando el token de confirmación
 	var emailHistory models.EmailHistory
 	filter := bson.M{
 		"token":      confirmationToken,
@@ -272,8 +305,25 @@ func ChangeEmailConfirm(c *gin.Context) {
 		return
 	}
 
-	// Obtener userID del registro encontrado
 	userID := emailHistory.UserID
+
+	// VERIFICAR que este sea el último token de confirmación válido para este usuario
+	// Buscamos si existe algún registro más reciente para este usuario
+	var newerRequest models.EmailHistory
+	newerFilter := bson.M{
+		"user_id":    userID,
+		"confirmed":  false,
+		"canceled":   false,
+		"changed_at": bson.M{"$gt": emailHistory.ChangedAt}, // Más reciente que el actual
+	}
+
+	err = db.MongoClient.Database("db").Collection("email_history").
+		FindOne(context.TODO(), newerFilter).Decode(&newerRequest)
+	if err == nil {
+		// Existe un token más reciente, invalidar este
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Token invalidado por una solicitud más reciente"})
+		return
+	}
 
 	// Verificar que el nuevo email no esté en uso por otro usuario
 	var existingUser models.User
@@ -329,7 +379,7 @@ func ChangeEmailCancel(c *gin.Context) {
 		return
 	}
 
-	// Buscar la solicitud de cambio pendiente usando solo el token
+	// Buscar la solicitud de cambio pendiente usando el token de confirmación
 	var emailHistory models.EmailHistory
 	filter := bson.M{
 		"token":     confirmationToken,
@@ -341,6 +391,26 @@ func ChangeEmailCancel(c *gin.Context) {
 		FindOne(context.TODO(), filter).Decode(&emailHistory)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Token no encontrado o ya procesado"})
+		return
+	}
+
+	userID := emailHistory.UserID
+
+	// VERIFICAR que este sea el último token de confirmación válido para este usuario
+	// Buscamos si existe algún registro más reciente para este usuario
+	var newerRequest models.EmailHistory
+	newerFilter := bson.M{
+		"user_id":    userID,
+		"confirmed":  false,
+		"canceled":   false,
+		"changed_at": bson.M{"$gt": emailHistory.ChangedAt}, // Más reciente que el actual
+	}
+
+	err = db.MongoClient.Database("db").Collection("email_history").
+		FindOne(context.TODO(), newerFilter).Decode(&newerRequest)
+	if err == nil {
+		// Existe un token más reciente, invalidar este
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Token invalidado por una solicitud más reciente"})
 		return
 	}
 
@@ -455,4 +525,28 @@ func CleanExpiredEmailTokens() {
 		// En un log real usarías un logger apropiado
 		fmt.Printf("Limpiados %d tokens de email expirados\n", result.DeletedCount)
 	}
+}
+
+// Logout invalida el token actual del usuario
+func Logout(c *gin.Context) {
+	userID, err := GetUserIDFromContext(c)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "No autorizado"})
+		return
+	}
+
+	// Limpiar el token actual para invalidar la sesión
+	_, err = db.MongoClient.Database("db").Collection("users").UpdateOne(context.TODO(),
+		bson.M{"_id": userID},
+		bson.M{"$set": bson.M{
+			"currentToken": "",
+			"updatedAt":    primitive.NewDateTimeFromTime(time.Now()),
+		}},
+	)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error cerrando sesión"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Sesión cerrada exitosamente"})
 }

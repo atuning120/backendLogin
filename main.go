@@ -21,13 +21,14 @@ func main() {
 
 	r.POST("/register", controllers.Register)                     // Registro de usuario
 	r.POST("/login", controllers.Login)                           // Login de usuario
+	r.POST("/logout", utils.AuthMiddleware(), controllers.Logout) // Logout de usuario
 	r.POST("/send-recovery-token", controllers.SendRecoveryToken) // recuperacion de correo
 	r.POST("/reset-password", controllers.ResetPassword)          // Resetear contraseña con token en header
 
 	/*EMAIL*/
 	r.POST("/change-email", utils.AuthMiddleware(), controllers.ChangeEmail)                                 // Cambiar correo electrónico
-	r.POST("/change-email-confirm", controllers.ChangeEmailConfirm)                                          // Confirmar cambio de correo electrónico
-	r.POST("/change-email-cancel", controllers.ChangeEmailCancel)                                            // Cancelar cambio de correo electrónico
+	r.POST("/change-email-confirm", controllers.ChangeEmailConfirm)                                          // Confirmar cambio de correo electrónico (solo con confirmation_token)
+	r.POST("/change-email-cancel", controllers.ChangeEmailCancel)                                            // Cancelar cambio de correo electrónico (solo con confirmation_token)
 	r.POST("/change-email-history", utils.AuthMiddleware(), controllers.ChangeEmailHistory)                  // Ver historial de cambios de correo electrónico
 	r.POST("/change-email-history/:id", utils.AuthMiddleware(), controllers.ChangeEmailHistoryByID)          // Ver historial de cambios de correo electrónico por ID
 	r.POST("/change-email-history/delete/:id", utils.AuthMiddleware(), controllers.DeleteChangeEmailHistory) // Eliminar un registro de cambio de correo electrónico
