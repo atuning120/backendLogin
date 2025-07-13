@@ -58,18 +58,33 @@ func ChangeEmail(c *gin.Context) {
 
 	// Verifica si ya hizo un cambio de correo CONFIRMADO en los últimos 30 días
 	now := time.Now()
+	thirtyDaysAgo := now.Add(-30 * 24 * time.Hour)
 	filter := bson.M{
 		"user_id":    userID,
 		"confirmed":  true, // Solo contar cambios confirmados
-		"changed_at": bson.M{"$gt": primitive.NewDateTimeFromTime(now.Add(-30 * 24 * time.Hour))},
+		"changed_at": bson.M{"$gt": primitive.NewDateTimeFromTime(thirtyDaysAgo)},
 	}
+
+	fmt.Printf("🔍 Verificando restricción de 30 días:\n")
+	fmt.Printf("   Usuario ID: %s\n", userID.Hex())
+	fmt.Printf("   Fecha actual: %s\n", now.Format("2006-01-02 15:04:05"))
+	fmt.Printf("   Fecha límite (30 días atrás): %s\n", thirtyDaysAgo.Format("2006-01-02 15:04:05"))
+
 	count, err := db.MongoClient.Database("db").Collection("email_history").CountDocuments(context.TODO(), filter)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error interno"})
 		return
 	}
+
+	fmt.Printf("   Cambios confirmados en los últimos 30 días: %d\n", count)
+
 	if count > 0 {
-		c.JSON(http.StatusForbidden, gin.H{"error": "Ya confirmaste un cambio de email en los últimos 30 días."})
+		c.JSON(http.StatusForbidden, gin.H{
+			"error": "Ya confirmaste un cambio de email en los últimos 30 días.",
+			"info": fmt.Sprintf("Fecha actual: %s. Debes esperar hasta: %s",
+				now.Format("2006-01-02 15:04:05"),
+				thirtyDaysAgo.Add(30*24*time.Hour).Format("2006-01-02 15:04:05")),
+		})
 		return
 	}
 
@@ -113,7 +128,7 @@ func ChangeEmail(c *gin.Context) {
 		Confirmed: false,
 		Canceled:  false,
 		ChangedAt: primitive.NewDateTimeFromTime(now),
-		ExpiresAt: primitive.NewDateTimeFromTime(now.Add(1 * time.Minute)), // Solo 1 minuto para confirmar
+		ExpiresAt: primitive.NewDateTimeFromTime(now.Add(30 * 24 * time.Hour)), //expira en 30 dias
 	}
 	_, err = db.MongoClient.Database("db").Collection("email_history").InsertOne(context.TODO(), history)
 	if err != nil {
